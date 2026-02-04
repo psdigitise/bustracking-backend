@@ -9,35 +9,58 @@ const CatchAsyncError = require('../middlewares/CatchAysncError')
 const APIFeatures = require('../utils/apiFeatures');
 //const Route = require('../models/routeModel');
 const Student = require('../models/parentModel');
+const ParentList = require('../models/sparentModel');
 //const Driver =mongoose.model('driver_list');
 
 exports.parent_login = async (req, res, next) => {
     try {
-        const login_status = await Parent.findOne({
+        console.log("Login Attempt:", req.body.user_name, req.body.password);
+
+        // 1. Try finding in Student List (Schema: Parent)
+        let login_status = await Parent.findOne({
             parent_email: req.body.user_name,
             parent_password: req.body.password
         }).select({ _id: 0 });
 
+        console.log("Login Result (StudentList):", login_status ? "Found" : "Not Found");
+
+        // 2. If not found, try finding in Parent List (Schema: ParentList)
+        if (!login_status) {
+            const parentUser = await ParentList.findOne({
+                parent_email: req.body.user_name,
+                parent_password: req.body.password
+            });
+
+            if (parentUser) {
+                console.log("User found in ParentList. Fetching linked student:", parentUser.student_id);
+                // Using the student_id from ParentList to fetch route details from student_list
+                const linkedStudent = await Parent.findOne({ student_id: parentUser.student_id });
+
+                if (linkedStudent) {
+                    login_status = linkedStudent; // Use student object for downstream logic
+                } else {
+                    console.log("Linked student not found.");
+                    login_status = parentUser; // Fallback (will result in no route found)
+                }
+            }
+        }
+
         const routeid = login_status?.route_id;
 
-        const asigned_data = await Routeasign.find({ route_id: routeid }).select({ _id: 0 }).sort({ _id: -1 });
+        // ... (proceed with existing logic using login_status)
 
+        const asigned_data = await Routeasign.find({ route_id: routeid }).select({ _id: 0 }).sort({ _id: -1 });
         const driverid = asigned_data?.[0]?.driver_id;
         const driverdetails = await Driver.find({ _id: driverid });
         const findSource = await Route.find({ route_id: routeid });
-       
-        const student_stop = await findSource.filter((e) => e._id == login_status?.bus_station)
+
+        const student_stop = await findSource.filter((e) => e._id == login_status?.bus_station);
         const destination_details = await schoolList.find();
+
         if (login_status) {
-            await Parent.updateOne(
-                { parent_email: req.body.user_name },
-                {
-                    $set: {
-                        fcmToken: req.body.fcmToken,
-                        serverKey: req.body.serverKey
-                    }
-                }
-            );
+            // Update tokens in both collections to be safe
+            await Parent.updateOne({ parent_email: req.body.user_name }, { $set: { fcmToken: req.body.fcmToken, serverKey: req.body.serverKey } });
+            await ParentList.updateOne({ parent_email: req.body.user_name }, { $set: { fcmToken: req.body.fcmToken, serverKey: req.body.serverKey } });
 
             req.session.loggedIn = true;
             res.status(200).json({
@@ -200,51 +223,51 @@ exports.add_stations = async (req, res, next) => {
 
 exports.fetchPickupDropStations = async (req, res, next) => {
     try {
-    const { route_id } = req.body;
-    if (!route_id) {
-    return res.status(400).json({
-    status: false,
-    message: "Route ID is required"
-    });
-    }
-    // Fetch all stations matching the route_id
-    // const stations = await Route.find({ route_id: route_id }).select({ id: 0, _v: 0 }); // Exclude MongoDB's id and _v fields
-    // if (stations.length === 0) {
-    // return res.status(404).json({
-    // status: false,
-    // message: "No stations found for the given route ID"
-    // });
-    // }
-    // res.status(200).json({
-    // status: true,
-    // stations: stations
-    // });
-    const stations = await Route.find({ route_id: route_id })
-    .select({ _v: 0 }) // Only exclude _v
-    .lean(); // Convert to plain JavaScript objects
-    // Rename _id to bustop_id in each station
-    const formattedStations = stations.map(station => {
-    const { _id, ...rest } = station;
-    return { bustop_id: _id, ...rest };
-    });
-    res.status(200).json({
-    status: true,
-    stations: formattedStations
-    });
+        const { route_id } = req.body;
+        if (!route_id) {
+            return res.status(400).json({
+                status: false,
+                message: "Route ID is required"
+            });
+        }
+        // Fetch all stations matching the route_id
+        // const stations = await Route.find({ route_id: route_id }).select({ id: 0, _v: 0 }); // Exclude MongoDB's id and _v fields
+        // if (stations.length === 0) {
+        // return res.status(404).json({
+        // status: false,
+        // message: "No stations found for the given route ID"
+        // });
+        // }
+        // res.status(200).json({
+        // status: true,
+        // stations: stations
+        // });
+        const stations = await Route.find({ route_id: route_id })
+            .select({ _v: 0 }) // Only exclude _v
+            .lean(); // Convert to plain JavaScript objects
+        // Rename _id to bustop_id in each station
+        const formattedStations = stations.map(station => {
+            const { _id, ...rest } = station;
+            return { bustop_id: _id, ...rest };
+        });
+        res.status(200).json({
+            status: true,
+            stations: formattedStations
+        });
     } catch (error) {
-    console.error("Error fetching pickup/drop stations:", error);
-    res.status(500).json({
-    status: false,
-    message: "Internal server error"
-    });
+        console.error("Error fetching pickup/drop stations:", error);
+        res.status(500).json({
+            status: false,
+            message: "Internal server error"
+        });
     }
-    };
+};
 
 //Update--> Added preferred bustop_id in student_list collections
 exports.setStudentBusStop = async (req, res) => {
     try {
         const { student_id, bustop_id } = req.body;
-        
+
         // Validate required fields
         if (!student_id || !bustop_id) {
             return res.status(400).json({
@@ -252,7 +275,7 @@ exports.setStudentBusStop = async (req, res) => {
                 message: "Student ID and Bustop ID are required"
             });
         }
-        
+
         // Find the student
         const student = await Student.findOne({ student_id: student_id });
         if (!student) {
@@ -261,7 +284,7 @@ exports.setStudentBusStop = async (req, res) => {
                 message: "No student found with the provided ID"
             });
         }
-        
+
         // Check if the bustop_id exists (without fetching full details)
         const stationExists = await mongoose.model('pickupdrop_station').exists({ _id: bustop_id });
         if (!stationExists) {
@@ -270,11 +293,11 @@ exports.setStudentBusStop = async (req, res) => {
                 message: "No pickup/drop station found with the provided ID"
             });
         }
-        
+
         // Update the student's preferred_bustop_id
         student.preferred_bustop_id = bustop_id;
         await student.save();
-        
+
         // Return success response (without bus stop details)
         res.status(200).json({
             success: true,
