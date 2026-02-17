@@ -348,8 +348,8 @@ process.on('uncaughtException', (err) => {
 const wss = new WebSocket.Server({ server });
 
 // MongoDB connection
-const mongoURI = process.env.DB_LOCAL_URI || 'mongodb://72.61.229.172:27017/bustracking ';
-const dbName = 'test';
+const mongoURI = process.env.DB_LOCAL_URI || 'mongodb://72.61.229.172:27017/bustracking';
+const dbName = 'bustracking';
 const client = new MongoClient(mongoURI);
 
 let db;

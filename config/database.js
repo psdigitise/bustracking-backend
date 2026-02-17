@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 
 const connectDatabase = () => {
-    mongoose.connect(process.env.DB_LOCAL_URI, {
+    mongoose.connect('mongodb://72.61.229.172:27017/bustracking', {
         useNewUrlParser: true,
         useUnifiedTopology: true
     }).then(con => {
